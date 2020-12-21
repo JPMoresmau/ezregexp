@@ -5,155 +5,36 @@ pub trait ToCode {
     fn to_code(&self) -> String;
 }
 
-pub struct Pattern {
-    exps: Vec<Expression>,
+#[derive(Debug)]
+pub enum Pattern {
+    Sequence(Vec<Pattern>),
+    Text(String),
+    Raw(String),
+    Or(Vec<Pattern>),
+        Many{exp:Box<Pattern>,
+        low: u32,
+        high: u32,
+    },
+    Digit,
 }
 
 impl Display for Pattern {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result {
-        self.exps.iter().map(|e| {
-            match e {
-                Expression::Or(..) if self.exps.len()>1 => write!(f, "({})", e),
-                _=> write!(f, "{}", e),
-            }
-        }).collect()
-    }
-}
-
-impl From<&str> for Pattern {
-    fn from(s:&str) -> Pattern {
-        Pattern{exps:vec![Expression::Text(s.to_owned())]}
-    }
-}
-
-impl From<String> for Pattern {
-    fn from(s:String) -> Pattern {
-        Pattern{exps:vec![Expression::Text(s)]}
-    }
-}
-
-impl ToCode for Pattern {
-    fn to_code(&self) -> String{
-        if self.exps.len()==1 {
-            match &self.exps[0]{
-                Expression::Text(txt) => format!("text(\"{}\")",txt),
-                Expression::Digit => "digit()".to_string(),
-                Expression::Or(exps) => format!("either(({}))",exps.iter().map(|e| e.to_code()).join(", ")),
-                Expression::Many{exp,low,high} => format!("{}.many({}, {})",exp.to_code(),low,high),
-                _ => String::new(),
-            }
-        } else if self.exps.len()>1 {
-            let mut s=String::new();
-            for e in &self.exps {
-                if s.is_empty(){
-                    s.push_str(&format!("start_with({})",e.to_code()));
-                } else {
-                    s.push_str(& match e {
-                        Expression::Or(exps) => format!(".and_either(({}))",exps.iter().map(|e| e.to_code()).join(", ")),
-                        Expression::Many{exp,low,high} => {
-                            match (low,high){
-                                (0,1)=>format!(".and_maybe({})",exp.to_code()),
-                                (0,0)=>format!(".and_maybe_many({})",exp.to_code()),
-                                (1,0)=>format!(".and_many({})",exp.to_code()),
-                                _=>format!(".and_then({}).many({},{})",exp.to_code(),low,high),
-
-                            }
-                        }
-                        _ =>  format!(".and_then({})",e.to_code()),
-                    });
-                }
-            }
-            s
-        } else {
-            String::new()
-        }
-    }
-}
-
-impl Pattern {
-
-    pub fn and_either<PL:PatternList>(&mut self, branches: PL)-> &mut Self {
-        self.exps.push(Expression::Or(branches.into_patterns().map(|p| Expression::from_list(p.exps)).collect()));
-        self
-    }
-
-    pub fn and_then<T:Into<Expression>>(&mut self, exp:T) -> &mut Self {
-        self.exps.push(exp.into());
-        self
-    }
-
-    pub fn and_maybe<T:Into<Expression>>(&mut self, exp:T) -> &mut Self {
-        self.exps.push(Expression::Many{exp:Box::new(exp.into()),low:0,high:1});
-        self
-    }
-
-    pub fn and_maybe_many<T:Into<Expression>>(&mut self, exp:T) -> &mut Self {
-        self.exps.push(Expression::Many{exp:Box::new(exp.into()),low:0,high:0});
-        self
-    }
-
-    pub fn and_many<T:Into<Expression>>(&mut self, exp:T) -> &mut Self {
-        self.exps.push(Expression::Many{exp:Box::new(exp.into()),low:1,high:0});
-        self
-    }
-
-    pub fn many(&mut self, low: usize, high: usize) -> &mut Self {
-        if let Some(e) = self.exps.pop(){
-            self.exps.push(Expression::Many{exp:Box::new(e),low:low,high:high});
-        }
-        self
-    }
-}
-
-
-#[derive(Debug)]
-pub enum Expression {
-    Sequence(Vec<Expression>),
-    Text(String),
-    Raw(String),
-    Or(Vec<Expression>),
-    Many{exp:Box<Expression>,
-         low: usize,
-         high: usize,
-        },
-    Digit,
-}
-
-impl From<&str> for Expression {
-    fn from(s:&str) -> Expression {
-        Expression::Text(s.to_owned())
-    }
-}
-
-impl From<String> for Expression {
-    fn from(s:String) -> Expression {
-        Expression::Text(s)
-    }
-}
-
-impl From<Pattern> for Expression {
-    fn from(p:Pattern) -> Expression {
-        Expression::Sequence(p.exps)
-    }
-}
-
-impl Display for Expression {
-    fn fmt(&self, f: &mut Formatter<'_>) -> Result {
         match self {
-            Expression::Sequence(v)=>v.iter().map(|e| {
+            Pattern::Sequence(v)=>v.iter().map(|e| {
                 match e {
-                    Expression::Or(..) if v.len()>1=> write!(f, "({})", e),
+                    Pattern::Or(..) if v.len()>1=> write!(f, "({})", e),
                     _=> write!(f, "{}", e),
                 }
             }).collect(),
-            Expression::Text(t)=> write!(f, "{}", t),
-            Expression::Raw(t)=> write!(f, "{}", t),
-            Expression::Or(v)=> {
-                v.iter().intersperse(&Expression::Raw("|".to_owned())).map(|e|{
+            Pattern::Text(t)=> write!(f, "{}", t),
+            Pattern::Raw(t)=> write!(f, "{}", t),
+            Pattern::Or(v)=> {
+                v.iter().intersperse(&Pattern::Raw("|".to_owned())).map(|e|{
                     write!(f, "{}", e)
                 }).collect::<Result>()
             },
-            Expression::Many{exp,low,high}=>{
+            Pattern::Many{exp,low,high}=>{
                 let mut s = format!("{}",exp);
                 if s.len()>2 || (s.len()==2 && s.chars().into_iter().next().unwrap() !='\\') {
                     s=format!("({})",s);
@@ -164,57 +45,162 @@ impl Display for Expression {
                     (1,0)=>write!(f,"{}+", s),
                     (l,h)=>write!(f,"{}{{{},{}}}", s, l, h),
                 }
-                
+
             },
-            Expression::Digit=>write!(f, r"\d"),
+            Pattern::Digit=>write!(f, r"\d"),
         }
     }
 }
 
-impl ToCode for Expression {
-    fn to_code(&self) -> String {
-        //println!("{:?}",self);
+impl From<&str> for Pattern {
+    fn from(s:&str) -> Pattern {
+        Pattern::Text(s.to_owned())
+    }
+}
+
+impl From<String> for Pattern {
+    fn from(s:String) -> Pattern {
+        Pattern::Text(s)
+    }
+}
+
+impl ToCode for Pattern {
+    fn to_code(&self) -> String{
+        self.to_inner_code(CodeState::root())
+    }
+}
+
+struct CodeState {
+    root: bool,
+    first: bool,
+}
+
+impl CodeState {
+    fn root()-> Self {
+        CodeState{root:true,first:true}
+    }
+
+    fn first() -> Self {
+        CodeState{root:false,first:true}
+    }
+
+    fn next() -> Self {
+        CodeState{root:false, first: false}
+    }
+}
+
+impl Pattern {
+
+    fn to_inner_code(&self, state: CodeState) -> String {
+        if state.first {
+            match self {
+                Pattern::Text(txt) => if state.root {
+                    format!("text(\"{}\")", txt)
+                } else {
+                    format!("\"{}\"", txt)
+                },
+                Pattern::Digit => "digit()".to_string(),
+                Pattern::Or(exps) => format!("either(({}))", exps.iter().map(|e| e.to_inner_code(CodeState::first())).join(", ")),
+                Pattern::Many { exp, low, high } => format!("{}.many({}, {})", exp.to_inner_code(CodeState::first()), low, high),
+                Pattern::Sequence(exps) => {
+                    let mut s = String::new();
+                    for e in exps {
+                        if s.is_empty() {
+                            s.push_str(&format!("start_with({})", e.to_inner_code(CodeState::first())));
+                        } else {
+                            s.push_str(&e.to_inner_code(CodeState::next()));
+                        }
+                    }
+                    s
+                },
+                _ => String::new(),
+            }
+        } else {
+            match self {
+                Pattern::Or(exps) => format!(".and_either(({}))",exps.iter().map(|e| e.to_inner_code(CodeState::first())).join(", ")),
+                Pattern::Many{exp,low,high} => {
+                    match (low,high){
+                        (0,1)=>format!(".and_maybe({})",exp.to_inner_code(CodeState::first())),
+                        (0,0)=>format!(".and_maybe_many({})",exp.to_inner_code(CodeState::first())),
+                        (1,0)=>format!(".and_many({})",exp.to_inner_code(CodeState::first())),
+                        _=>format!(".and_then({}).many({},{})",exp.to_inner_code(CodeState::first()),low,high),
+
+                    }
+                }
+                _ =>  format!(".and_then({})",self.to_inner_code(CodeState::first())),
+            }
+        }
+
+    }
+
+    pub fn and_either<PL:PatternList>(self, branches: PL)-> Self {
+        self.push(Pattern::Or(branches.into_patterns().collect()))
+    }
+
+    pub fn and_then<T:Into<Pattern>>(self, exp:T) -> Self {
+        self.push(exp.into())
+    }
+
+    pub fn and_maybe<T:Into<Pattern>>(self, exp:T) -> Self {
+        self.push(Pattern::Many{exp:Box::new(exp.into()),low:0,high:1})
+    }
+
+    pub fn and_maybe_many<T:Into<Pattern>>(self, exp:T) -> Self {
+        self.push(Pattern::Many{exp:Box::new(exp.into()),low:0,high:0})
+    }
+
+    pub fn and_many<T:Into<Pattern>>(self, exp:T) -> Self {
+        self.push(Pattern::Many{exp:Box::new(exp.into()),low:1,high:0})
+    }
+
+    pub fn many(self, low: u32, high: u32) -> Self {
         match self {
-            Expression::Text(txt) => format!("\"{}\"", txt),
-            Expression::Digit => "digit()".to_string(),
-            _ => String::new(),
+            Pattern::Sequence(mut exps) if exps.len()>0 => {
+                let e=exps.pop().unwrap();
+                exps.push(Pattern::Many{exp:Box::new(e),low:low,high:high});
+                Pattern::Sequence(exps)
+            },
+            _ => Pattern::Many{exp:Box::new(self),low:low,high:high},
         }
-    }
-}
+       
 
-impl Expression {
-    pub fn from_list(mut exprs: Vec<Expression>) -> Expression {
+    }
+
+    /*fn from_list(mut exprs: Vec<Pattern>) -> Pattern {
         if exprs.len()==1 {
             exprs.pop().unwrap()
         } else {
-            Expression::Sequence(exprs)
+            Pattern::Sequence(exprs)
+        }
+    }*/
+
+    fn push(self, p2: Pattern) -> Self {
+        match self {
+            Pattern::Sequence(mut exps)=> {
+                exps.push(p2);
+                Pattern::Sequence(exps)
+            },
+            _ => Pattern::Sequence(vec![self,p2])
         }
     }
 }
 
 
-pub fn start_with<T:Into<Expression>>(exp:T)-> Pattern {
-    let mut p = Pattern{exps:vec![]};
-    p.exps.push(exp.into());
-    p
+
+pub fn start_with<T:Into<Pattern>>(exp:T)-> Pattern {
+    exp.into()
 }
 
 pub fn text(text: &str)-> Pattern {
-    let mut p = Pattern{exps:vec![]};
-    p.exps.push(Expression::Text(text.to_owned()));
-    p
+   Pattern::Text(text.to_owned())
 }
 
 pub fn digit() -> Pattern {
-    let mut p = Pattern{exps:vec![]};
-    p.exps.push(Expression::Digit);
-    p
+    Pattern::Digit
 }
 
 pub fn either<PL:PatternList>(branches: PL)-> Pattern {
-    let mut p = Pattern{exps:vec![]};
-    p.exps.push(Expression::Or(branches.into_patterns().map(|p| Expression::from_list(p.exps)).collect()));
-    p
+    Pattern::Or(branches.into_patterns().collect())
 }
 
 
