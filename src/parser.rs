@@ -1,17 +1,21 @@
+//! Parse a regular expression into a pattern
+
 use crate::builder::Pattern;
 use regex_syntax::ast::{
     parse::Parser, Alternation, Assertion, AssertionKind, Ast, Class, ClassPerl, ClassPerlKind,
     Concat, Error, Group, Literal, Repetition, RepetitionKind, RepetitionOp, RepetitionRange,
 };
 
+/// Explain a regex: turn it into a pattern
 pub fn explain(regex: &str) -> Result<Pattern, Error> {
     let mut p = Parser::new();
     p.parse(regex).and_then(|a| {
-        println!("ast: {:?}", a);
+        //println!("ast: {:?}", a);
         do_explain(&a)
     })
 }
 
+/// Do the explaining
 fn do_explain(ast: &Ast) -> Result<Pattern, Error> {
     match ast {
         Ast::Concat(Concat { asts, .. }) => Ok(simplify(
@@ -50,6 +54,7 @@ fn do_explain(ast: &Ast) -> Result<Pattern, Error> {
     }
 }
 
+/// Extract bound from a RepetitionOp
 fn bounds(op: &RepetitionOp) -> (u32, u32) {
     match &op.kind {
         RepetitionKind::ZeroOrOne => (0, 1),
@@ -63,6 +68,7 @@ fn bounds(op: &RepetitionOp) -> (u32, u32) {
     }
 }
 
+/// Simplify a list of patterns
 fn simplify(exps: Vec<Pattern>) -> Pattern {
     let mut nexps = vec![];
     for p in exps.into_iter() {

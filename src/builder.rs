@@ -1,26 +1,39 @@
+//! Build regular expression from fluent API
+
 use itertools::Itertools;
 use std::fmt::{Display, Formatter, Result};
 
+/// Generate Rust code
 pub trait ToCode {
     fn to_code(&self) -> String;
 }
 
+/// A Regular Expression Pattern
 #[derive(Debug)]
 pub enum Pattern {
+    /// Sequence of patterns
     Sequence(Vec<Pattern>),
+    /// Text
     Text(String),
+    /// Raw (unprocessed text), used internally
     Raw(String),
+    /// Alternative
     Or(Vec<Pattern>),
+    /// Repetition
     Many {
         exp: Box<Pattern>,
         low: u32,
         high: u32,
     },
+    /// Digit
     Digit,
+    /// Start of line/input
     InputStart,
+    /// End of line/input
     InputEnd,
 }
 
+/// Generate regular expression from Pattern
 impl Display for Pattern {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result {
         match self {
@@ -58,30 +71,38 @@ impl Display for Pattern {
     }
 }
 
+/// Convert a string into a text pattern
 impl From<&str> for Pattern {
     fn from(s: &str) -> Pattern {
         Pattern::Text(s.to_owned())
     }
 }
 
+/// Convert a string into a text pattern
 impl From<String> for Pattern {
     fn from(s: String) -> Pattern {
         Pattern::Text(s)
     }
 }
 
+/// Convert Pattern to Rust code
 impl ToCode for Pattern {
     fn to_code(&self) -> String {
         self.to_inner_code(CodeState::root())
     }
 }
 
+/// Inner state for generation code
 struct CodeState {
+    /// are we at root of code?
     root: bool,
+    /// are we first pattern in sequence?
     first: bool,
 }
 
+/// CodeState helper function
 impl CodeState {
+    /// Root, First
     fn root() -> Self {
         CodeState {
             root: true,
@@ -89,6 +110,7 @@ impl CodeState {
         }
     }
 
+    /// First but not root
     fn first() -> Self {
         CodeState {
             root: false,
@@ -96,6 +118,7 @@ impl CodeState {
         }
     }
 
+    /// Not first, not root
     fn next() -> Self {
         CodeState {
             root: false,
@@ -105,6 +128,7 @@ impl CodeState {
 }
 
 impl Pattern {
+    /// Conversion to rust code
     fn to_inner_code(&self, state: CodeState) -> String {
         if state.first {
             match self {
@@ -180,14 +204,17 @@ impl Pattern {
         }
     }
 
+    /// Chain an alternative
     pub fn and_either<PL: PatternList>(self, branches: PL) -> Self {
         self.push(Pattern::Or(branches.into_patterns().collect()))
     }
 
+    /// Append a new pattern
     pub fn and_then<T: Into<Pattern>>(self, exp: T) -> Self {
         self.push(exp.into())
     }
 
+    /// Append an optional pattern
     pub fn and_maybe<T: Into<Pattern>>(self, exp: T) -> Self {
         self.push(Pattern::Many {
             exp: Box::new(exp.into()),
@@ -196,6 +223,7 @@ impl Pattern {
         })
     }
 
+    /// Append a pattern zero or more times
     pub fn and_maybe_many<T: Into<Pattern>>(self, exp: T) -> Self {
         self.push(Pattern::Many {
             exp: Box::new(exp.into()),
@@ -204,6 +232,7 @@ impl Pattern {
         })
     }
 
+    /// Append a pattern one or more times
     pub fn and_many<T: Into<Pattern>>(self, exp: T) -> Self {
         self.push(Pattern::Many {
             exp: Box::new(exp.into()),
@@ -212,6 +241,7 @@ impl Pattern {
         })
     }
 
+    /// Repeat the previous pattern between low and high times
     pub fn many(self, low: u32, high: u32) -> Self {
         match self {
             Pattern::Sequence(mut exps) if exps.len() > 0 => {
@@ -231,10 +261,12 @@ impl Pattern {
         }
     }
 
+    /// Repeat the previous pattern n times
     pub fn times(self, n: u32) -> Self {
         self.many(n, n)
     }
 
+    /// Must reach end of input
     pub fn must_end(self) -> Self {
         self.push(Pattern::InputEnd)
     }
@@ -247,6 +279,7 @@ impl Pattern {
         }
     }*/
 
+    /// Push a pattern next to self, maybe converting self into sequence
     fn push(self, p2: Pattern) -> Self {
         match self {
             Pattern::Sequence(mut exps) => {
@@ -258,36 +291,44 @@ impl Pattern {
     }
 }
 
+/// Start of input
 pub fn at_start() -> Pattern {
     Pattern::InputStart
 }
 
+/// Start matching with given pattern
 pub fn start_with<T: Into<Pattern>>(exp: T) -> Pattern {
     exp.into()
 }
 
+/// Match given text
 pub fn text(text: &str) -> Pattern {
     Pattern::Text(text.to_owned())
 }
 
+/// Match a digit
 pub fn digit() -> Pattern {
     Pattern::Digit
 }
 
+/// Match any of the given patterns
 pub fn either<PL: PatternList>(branches: PL) -> Pattern {
     Pattern::Or(branches.into_patterns().collect())
 }
 
+/// Conversion into a list of patterns
 pub trait PatternList {
     fn into_patterns(self) -> Box<dyn Iterator<Item = Pattern>>;
 }
 
+/// Convert a vector of patterns into an iterator
 impl PatternList for Vec<Pattern> {
     fn into_patterns(self) -> Box<dyn Iterator<Item = Pattern>> {
         Box::new(self.into_iter())
     }
 }
 
+/// Convert a tuple of patterns into an iterator
 impl<T1, T2> PatternList for (T1, T2)
 where
     T1: Into<Pattern>,
@@ -298,6 +339,7 @@ where
     }
 }
 
+/// Convert a tripler of patterns into an iterator
 impl<T1, T2, T3> PatternList for (T1, T2, T3)
 where
     T1: Into<Pattern>,
