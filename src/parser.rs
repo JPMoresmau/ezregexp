@@ -3,14 +3,15 @@
 use crate::builder::Pattern;
 use regex_syntax::ast::{
     parse::Parser, Alternation, Assertion, AssertionKind, Ast, Class, ClassPerl, ClassPerlKind,
-    Concat, Error, Group, Literal, Repetition, RepetitionKind, RepetitionOp, RepetitionRange,
+    ClassUnicode, ClassUnicodeKind, Concat, Error, Group, Literal, Repetition, RepetitionKind,
+    RepetitionOp, RepetitionRange,
 };
 
 /// Explain a regex: turn it into a pattern
 pub fn explain(regex: &str) -> Result<Pattern, Error> {
     let mut p = Parser::new();
     p.parse(regex).and_then(|a| {
-        //println!("ast: {:?}", a);
+        println!("ast: {:?}", a);
         do_explain(&a)
     })
 }
@@ -40,8 +41,24 @@ fn do_explain(ast: &Ast) -> Result<Pattern, Error> {
         }
         Ast::Class(Class::Perl(ClassPerl {
             kind: ClassPerlKind::Digit,
+            negated:false,
             ..
         })) => Ok(Pattern::Digit),
+        Ast::Class(Class::Perl(ClassPerl {
+            kind: ClassPerlKind::Digit,
+            negated:true,
+            ..
+        })) => Ok(Pattern::Not(Box::new(Pattern::Digit))),
+        Ast::Class(Class::Perl(ClassPerl {
+            kind: ClassPerlKind::Word,
+            negated:false,
+            ..
+        })) => Ok(Pattern::WordCharacter),
+        Ast::Class(Class::Perl(ClassPerl {
+            kind: ClassPerlKind::Word,
+            negated:true,
+            ..
+        })) => Ok(Pattern::Not(Box::new(Pattern::WordCharacter))),
         Ast::Assertion(Assertion {
             kind: AssertionKind::StartLine,
             ..
@@ -50,6 +67,17 @@ fn do_explain(ast: &Ast) -> Result<Pattern, Error> {
             kind: AssertionKind::EndLine,
             ..
         }) => Ok(Pattern::InputEnd),
+        Ast::Class(Class::Unicode(ClassUnicode {
+            kind: ClassUnicodeKind::OneLetter(c),
+            negated: false,
+            ..
+        })) if *c == 'N' => Ok(Pattern::Letter),
+        Ast::Class(Class::Unicode(ClassUnicode {
+            kind: ClassUnicodeKind::OneLetter(c),
+            negated: true,
+            ..
+        })) if *c == 'N' => Ok(Pattern::Not(Box::new(Pattern::Letter))),
+        Ast::Dot{..} => Ok(Pattern::Any),
         _ => Ok(Pattern::Raw(String::new())),
     }
 }
@@ -147,26 +175,21 @@ mod tests {
 
     #[test]
     fn test_basic_explain() {
+        assert_explain(r#"text("Handel")"#,"Handel");
+        assert_explain(r#"word_character()"#,r"\w");
+        assert_explain(r#"letter()"#,r"\pN");
+        assert_explain(r#"either(("gray", "grey"))"#,"gray|grey");
+        assert_explain(r#"start_with("gr").and_either(("a", "e")).and_then("y")"#,"gr(a|e)y");
+        assert_explain(r#"start_with("colo").and_maybe("u").and_then("r")"#,"colou?r");
+        assert_explain(r#"digit().many(2, 3)"#,r#"\d{2,3}"#);
+        assert_explain(r#"at_start().and_then(digit()).times(4).and_then("-").and_then(digit()).times(2).and_then("-").and_then(digit()).times(2).must_end()"#,r"^\d{4}-\d{2}-\d{2}$");
+        assert_explain(r#"any_except(digit()).and_then(any_except(letter())).and_then(any_except(word_character()))"#,r#"\D\PN\W"#);
+    }
+
+    fn assert_explain(expected: &str, regex: &str){
         assert_eq!(
-            Ok(r#"text("Handel")"#.to_owned()),
-            explain("Handel").map(|p| p.to_code())
+            Ok(expected.to_owned()),
+            explain(regex).map(|p| p.to_code())
         );
-        assert_eq!(
-            Ok(r#"either(("gray", "grey"))"#.to_owned()),
-            explain("gray|grey").map(|p| p.to_code())
-        );
-        assert_eq!(
-            Ok(r#"start_with("gr").and_either(("a", "e")).and_then("y")"#.to_owned()),
-            explain("gr(a|e)y").map(|p| p.to_code())
-        );
-        assert_eq!(
-            Ok(r#"start_with("colo").and_maybe("u").and_then("r")"#.to_owned()),
-            explain("colou?r").map(|p| p.to_code())
-        );
-        assert_eq!(
-            Ok(r#"digit().many(2, 3)"#.to_owned()),
-            explain(r#"\d{2,3}"#).map(|p| p.to_code())
-        );
-        assert_eq!(Ok(r#"at_start().and_then(digit()).times(4).and_then("-").and_then(digit()).times(2).and_then("-").and_then(digit()).times(2).must_end()"#.to_owned()),explain(r"^\d{4}-\d{2}-\d{2}$").map(|p| p.to_code()));
     }
 }

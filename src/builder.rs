@@ -27,10 +27,20 @@ pub enum Pattern {
     },
     /// Digit
     Digit,
+    /// Letter,
+    Letter,
+    /// Word characters
+    WordCharacter,
     /// Start of line/input
     InputStart,
     /// End of line/input
     InputEnd,
+    /// Negation
+    Not(Box<Pattern>),
+    /// Anything
+    Any,
+    /// Named group
+    Named{exp:Box<Pattern>,name:String},
 }
 
 /// Generate regular expression from Pattern
@@ -65,8 +75,21 @@ impl Display for Pattern {
                 }
             }
             Pattern::Digit => write!(f, r"\d"),
+            Pattern::Letter => write!(f, r"\pN"),
+            Pattern::WordCharacter => write!(f, r"\w"),
             Pattern::InputStart => write!(f, "^"),
             Pattern::InputEnd => write!(f, "$"),
+            Pattern::Not(exp)=> {
+                match **exp {
+                    Pattern::Digit => write!(f, r"\D"),
+                    Pattern::Letter => write!(f, r"\PN"),
+                    Pattern::WordCharacter => write!(f, r"\W"),
+                    _ => write!(f, ""),
+                }
+            }
+            Pattern::Any => write!(f,"."),
+            Pattern::Named{exp, name} => write!(f, r"(?P<{}>{})",name,exp),
+            
         }
     }
 }
@@ -140,12 +163,16 @@ impl Pattern {
                     }
                 }
                 Pattern::Digit => "digit()".to_string(),
+                Pattern::Any => "any()".to_string(),
+                Pattern::Letter => "letter()".to_string(),
+                Pattern::WordCharacter => "word_character()".to_string(),
                 Pattern::Or(exps) => format!(
                     "either(({}))",
                     exps.iter()
                         .map(|e| e.to_inner_code(CodeState::first()))
                         .join(", ")
                 ),
+                Pattern::Not (exp ) => format!("any_except({})",exp.to_inner_code(CodeState::first())),
                 Pattern::Many { exp, low, high } => format!(
                     "{}.many({}, {})",
                     exp.to_inner_code(CodeState::first()),
@@ -159,7 +186,19 @@ impl Pattern {
                             match e {
                                 Pattern::InputStart => {
                                     s.push_str(&e.to_inner_code(CodeState::first()))
-                                }
+                                },
+                                Pattern::Not(..) => {
+                                    s.push_str(&e.to_inner_code(CodeState::first()))
+                                },
+                                Pattern::Digit => {
+                                    s.push_str(&e.to_inner_code(CodeState::first()))
+                                },
+                                Pattern::Letter => {
+                                    s.push_str(&e.to_inner_code(CodeState::first()))
+                                },
+                                Pattern::WordCharacter => {
+                                    s.push_str(&e.to_inner_code(CodeState::first()))
+                                },
                                 _ => s.push_str(&format!(
                                     "start_with({})",
                                     e.to_inner_code(CodeState::first())
@@ -199,6 +238,7 @@ impl Pattern {
                     ),
                 },
                 Pattern::InputEnd => ".must_end()".to_string(),
+                Pattern::Named{exp,name}=>format!(r#"{}.named("{}")"#,exp,name),
                 _ => format!(".and_then({})", self.to_inner_code(CodeState::first())),
             }
         }
@@ -266,6 +306,24 @@ impl Pattern {
         self.many(n, n)
     }
 
+    /// name preceding pattern
+    pub fn named<S: Into<String>>(self, name: S) -> Self {
+        match self {
+            Pattern::Sequence(mut exps) if exps.len() > 0 => {
+                let e = exps.pop().unwrap();
+                exps.push(Pattern::Named {
+                    exp: Box::new(e),
+                    name: name.into(),
+                });
+                Pattern::Sequence(exps)
+            }
+            _ => Pattern::Named {
+                exp: Box::new(self),
+                name: name.into(),
+            },
+        }
+    }
+
     /// Must reach end of input
     pub fn must_end(self) -> Self {
         self.push(Pattern::InputEnd)
@@ -309,6 +367,25 @@ pub fn text(text: &str) -> Pattern {
 /// Match a digit
 pub fn digit() -> Pattern {
     Pattern::Digit
+}
+
+/// Match a letter
+pub fn letter() -> Pattern {
+    Pattern::Letter
+}
+
+/// Match anything
+pub fn anything() -> Pattern {
+    Pattern::Any
+}
+
+/// Match a word character
+pub fn word_character() -> Pattern {
+    Pattern::WordCharacter
+}
+
+pub fn any_except<T: Into<Pattern>>(exp: T) -> Pattern {
+    Pattern::Not(Box::new(exp.into()))
 }
 
 /// Match any of the given patterns
@@ -385,6 +462,22 @@ mod tests {
                 .must_end()
                 .to_string()
         );
+        assert_eq!(r#"\D\PN\W"#,any_except(digit()).and_then(any_except(letter())).and_then(any_except(word_character())).to_string());
+        assert_eq!(
+            r"(?P<y>\d{4})-(?P<m>\d{2})-(?P<d>\d{2})",
+                start_with(digit()
+                    .times(4)
+                    .named("y"))
+                .and_then("-")
+                .and_then(digit()
+                    .times(2)
+                    .named("m"))
+                .and_then("-")
+                .and_then(digit()
+                    .times(2)
+                    .named("d"))
+                .to_string()
+        );
     }
 
     #[test]
@@ -417,5 +510,6 @@ mod tests {
                 .must_end()
                 .to_code()
         );
+        assert_eq!(r#"any_except(digit()).and_then(any_except(letter())).and_then(any_except(word_character()))"#,any_except(digit()).and_then(any_except(letter())).and_then(any_except(word_character())).to_code());
     }
 }
