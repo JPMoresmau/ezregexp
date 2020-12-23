@@ -3,9 +3,17 @@ name = "ezregexp"
 version = "0.0.1"
 authors = ["JP Moresmau <jp@moresmau.fr>"]
 edition = "2018"
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+description = "A fluent API to build and understand regular expressions"
+homepage = "https://github.com/JPMoresmau/ezregexp"
+keywords = ["regular expressions"]
+categories = ["text-processing"]
+license = "MIT"
+repository = "https://github.com/JPMoresmau/ezregexp"
+readme = "README.md"
 
 [dependencies]
 regex-syntax = "0.6.21"
 itertools = "0.9.0"
+
+[dev-dependencies]
+regex = "1.4.2"

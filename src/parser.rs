@@ -3,7 +3,7 @@
 use crate::builder::Pattern;
 use regex_syntax::ast::{
     parse::Parser, Alternation, Assertion, AssertionKind, Ast, Class, ClassPerl, ClassPerlKind,
-    ClassUnicode, ClassUnicodeKind, Concat, Error, Group, Literal, Repetition, RepetitionKind,
+    ClassUnicode, ClassUnicodeKind, Concat, Error, Group, GroupKind, Literal, Repetition, RepetitionKind,
     RepetitionOp, RepetitionRange,
 };
 
@@ -11,7 +11,7 @@ use regex_syntax::ast::{
 pub fn explain(regex: &str) -> Result<Pattern, Error> {
     let mut p = Parser::new();
     p.parse(regex).and_then(|a| {
-        println!("ast: {:?}", a);
+        //println!("ast: {:?}", a);
         do_explain(&a)
     })
 }
@@ -30,6 +30,7 @@ fn do_explain(ast: &Ast) -> Result<Pattern, Error> {
                 .map(|a| do_explain(a))
                 .collect::<Result<Vec<Pattern>, Error>>()?,
         )),
+        Ast::Group(Group { ast, kind:GroupKind::CaptureName(n),.. }) => do_explain(ast).map(|p| Pattern::Named{exp:Box::new(p),name:n.name.clone()}),
         Ast::Group(Group { ast, .. }) => do_explain(ast),
         Ast::Repetition(Repetition { ast, op, .. }) => {
             let bds = bounds(op);
@@ -112,7 +113,12 @@ fn simplify(exps: Vec<Pattern>) -> Pattern {
                 nexps.push(Pattern::Text(t));
             }
         } else {
-            nexps.push(p);
+            if matches!(&p, Pattern::Raw(s) if s.is_empty()){
+                // ignore
+            } else {
+                nexps.push(p);
+            }
+            
         }
     }
     if nexps.len() == 1 {
@@ -184,6 +190,13 @@ mod tests {
         assert_explain(r#"digit().many(2, 3)"#,r#"\d{2,3}"#);
         assert_explain(r#"at_start().and_then(digit()).times(4).and_then("-").and_then(digit()).times(2).and_then("-").and_then(digit()).times(2).must_end()"#,r"^\d{4}-\d{2}-\d{2}$");
         assert_explain(r#"any_except(digit()).and_then(any_except(letter())).and_then(any_except(word_character()))"#,r#"\D\PN\W"#);
+        assert_explain(r#"start_with(digit().times(4).named("y")).and_then("-").and_then(digit().times(2).named("m")).and_then("-").and_then(digit().times(2).named("d"))"#,r#"(?x)
+    (?P<y>\d{4})  # the year
+    -
+    (?P<m>\d{2}) # the month
+    -
+    (?P<d>\d{2})   # the day
+    "#);
     }
 
     fn assert_explain(expected: &str, regex: &str){

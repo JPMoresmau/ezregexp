@@ -173,12 +173,18 @@ impl Pattern {
                         .join(", ")
                 ),
                 Pattern::Not (exp ) => format!("any_except({})",exp.to_inner_code(CodeState::first())),
+                Pattern::Many { exp, low, high } if low==high => format!(
+                    "{}.times({})",
+                    exp.to_inner_code(CodeState::first()),
+                    low
+                ),
                 Pattern::Many { exp, low, high } => format!(
                     "{}.many({}, {})",
                     exp.to_inner_code(CodeState::first()),
                     low,
                     high
                 ),
+                Pattern::Named{exp,name}=>format!(r#"{}.named("{}")"#,exp.to_inner_code(CodeState::first()),name),
                 Pattern::Sequence(exps) => {
                     let mut s = String::new();
                     for e in exps {
@@ -238,7 +244,7 @@ impl Pattern {
                     ),
                 },
                 Pattern::InputEnd => ".must_end()".to_string(),
-                Pattern::Named{exp,name}=>format!(r#"{}.named("{}")"#,exp,name),
+                Pattern::Named{exp,name}=>format!(r#".and_then({}.named("{}"))"#,exp.to_inner_code(CodeState::first()),name),
                 _ => format!(".and_then({})", self.to_inner_code(CodeState::first())),
             }
         }
@@ -511,5 +517,6 @@ mod tests {
                 .to_code()
         );
         assert_eq!(r#"any_except(digit()).and_then(any_except(letter())).and_then(any_except(word_character()))"#,any_except(digit()).and_then(any_except(letter())).and_then(any_except(word_character())).to_code());
+        assert_eq!(r#"start_with(digit().times(4).named("y")).and_then("-").and_then(digit().times(2).named("m")).and_then("-").and_then(digit().times(2).named("d"))"#,start_with(digit().times(4).named("y")).and_then("-").and_then(digit().times(2).named("m")).and_then("-").and_then(digit().times(2).named("d")).to_code());
     }
 }
